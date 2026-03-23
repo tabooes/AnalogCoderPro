@@ -37,6 +37,75 @@ This work is an extension of [AnalogCoder](https://arxiv.org/abs/2405.14918) (AA
 - [ ] Update the BO optimization.
 - [ ] Update all ablation study prompts.
 
+# 🗂️ Software Structure
+
+## Overall Workflow
+
+```
+User specifies task_id → run.py reads problem_set.tsv
+       ↓
+LLM generates PySpice circuit code (prompt_template*.md)
+       ↓
+run.py executes the code → ngspice simulation
+       ↓
+Error?  ┌─ Execution error  → execution_error.md  → LLM retry
+        ├─ Floating node    → simulation_error.md → LLM retry
+        └─ Bad waveform     → vlm_debug_prompt.md → VLM retry (optional)
+       ↓
+Functional check (problem_check/<Type>.py)
+       ↓
+[Opt tasks only] optimize_template.md → LLM parameterises circuit
+                                       → Bayesian optimisation (Optuna)
+```
+
+## Root-level Files
+
+| File | Description |
+|------|-------------|
+| `run.py` | **Main entry point.** Parses CLI arguments, reads task specs from `problem_set.tsv`, calls the LLM to generate PySpice circuit code, runs ngspice simulation, handles execution/simulation errors via iterative LLM feedback, optionally invokes the VLM for waveform-based diagnosis, performs DC-sweep bias-point search, runs functional test benches, and orchestrates Bayesian optimisation for Opt-level tasks. |
+| `opamp.py` | Defines the `Opamp` PySpice `SubCircuitFactory` — a 5 V CMOS differential op-amp used as a pre-built building block by complex circuit designs (oscillators, integrators, differentiators, Schmitt triggers, etc.). |
+| `dc_sweep_template.py` | Template code that is injected into generated amplifier/op-amp circuits. Performs a three-level (coarse → medium → fine) DC sweep to automatically find the optimal input bias point where Vout ≈ VDD/2. |
+| `prompt_template.md` | LLM prompt template for **standard MOSFET-level** circuit generation (5 V supply, 1 µm technology). Includes a worked example and design rules. |
+| `prompt_template_comptex.md` | LLM prompt template for **complex circuits** that reuse the pre-built `Opamp` subcircuit (e.g., oscillators, integrators, adders, Schmitt triggers). Shows how to instantiate and wire the `Opamp` subcircuit. |
+| `prompt_template_optimize.md` | LLM prompt template for **optimisation-mode** circuit generation (45 nm technology, 1.2 V supply). Instructs the LLM to import technology-specific MOSFET parameters from a `model` module. |
+| `optimize_template.md` | Prompt template that asks the LLM to convert a fixed-parameter PySpice circuit into a **parameterised** `create_circuit(params)` function and define Optuna search ranges, enabling automated Bayesian optimisation. |
+| `execution_error.md` | Error-recovery prompt template. When generated circuit code raises a Python or structural error, this prompt (with the error message filled in) is sent back to the LLM for correction. |
+| `simulation_error.md` | Error-recovery prompt template for **floating-node** ngspice errors. Identifies the floating node and asks the LLM to reconnect it. |
+| `vlm_debug_prompt.md` | Prompt template for the **vision-language model (VLM)** component. Given a waveform image and expected behaviour description, the VLM analyses the waveform and explains discrepancies (no circuit suggestions — diagnosis only). |
+| `problem_set.tsv` | **Benchmark dataset.** Defines 29 standard circuit-design tasks (IDs 1–29, levels Easy/Medium/Hard) and 16 optimisation tasks (IDs 51–66). Columns: `Id`, `Level`, `Circuit` description, `Input`/`Output` node names, `Type`, `Submodule Name`, `Testbench` instructions, `Normal` output description. |
+
+## `problem_check/` Directory
+
+Contains functional **test-bench scripts** for each circuit type. After a circuit passes simulation, `run.py` appends the corresponding test bench to the generated code and re-executes it to verify correct electrical behaviour.
+
+| File | Circuit Type Tested |
+|------|---------------------|
+| `Amplifier.py` | Single/multi-stage amplifiers — measures AC voltage gain at 100 Hz |
+| `Opamp.py` | Differential op-amps — measures differential-mode AC gain |
+| `Inverter.py` | MOSFET inverters — checks voltage inversion |
+| `CurrentMirror.py` | Current mirrors — verifies current mirroring ratio |
+| `Comparator.py` | Comparators — sweeps Vin 0→5 V and checks output switching |
+| `LowPass.py` | Low-pass filters — frequency sweep, checks roll-off |
+| `HighPass.py` | High-pass filters — frequency sweep, checks pass-band |
+| `BandPass.py` | Band-pass filters — frequency sweep, checks centre-band gain |
+| `BandStop.py` | Band-stop filters — frequency sweep, checks notch attenuation |
+| `Oscillator.py` | RC / Wien-bridge oscillators — transient sim, checks periodicity |
+| `OscillatorFFT.py` | Oscillators with FFT — verifies dominant frequency component |
+| `Integrator.py` | Op-amp integrators — inputs square wave, checks triangle output |
+| `Differentiator.py` | Op-amp differentiators — inputs triangle wave, checks square output |
+| `Adder.py` | Op-amp adders — verifies Vout = −(Vin1 + Vin2) |
+| `Subtractor.py` | Op-amp subtractors — verifies Vout = Vin2 − Vin1 |
+| `Mixer.py` | Gilbert cell mixers — FFT checks down/up-conversion products |
+| `Schmitt.py` | Schmitt triggers — inputs sine wave, checks square-wave output |
+
+## `sample_design/` Directory
+
+Contains **reference circuit implementations** for all benchmark tasks (p1–p28). Each subdirectory `pN/` holds:
+
+- `pN.py` — A working PySpice circuit file for task N.
+- `pN_waveform.png` *(where present)* — A simulation waveform image demonstrating correct circuit behaviour.
+- `opamp.py` *(in folders p9, p22–p28)* — A local copy of the op-amp subcircuit required by that design.
+
 # 🧪 Benchmark
 - Task descriptions are in the file `problem_set.tsv`.
 - Sample circuits are in the `sample_design` directory.
