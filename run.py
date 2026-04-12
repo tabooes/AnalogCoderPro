@@ -776,6 +776,9 @@ def optimize_code(code_path, task_id, task_type, task):
             prompt_path = code_path.replace("_success.py", "_optimize_prompt.md")
             with open(prompt_path, 'w') as f:
                 f.write(optimize_prompt)
+            # --- LLM Stage 4: Performance Optimization ---
+            # The LLM converts the validated circuit netlist into a parameterized
+            # form (with search ranges) suitable for Bayesian Optimization.
             completion = client.chat.completions.create(
                 model=args.model,
                 messages=[
@@ -906,6 +909,9 @@ def work(task, input, output, task_id, it, background, task_type, flog = None,
     
     retry = True
 
+    # --- LLM Stage 1: Circuit Code Generation ---
+    # The LLM translates the natural-language circuit specification into
+    # executable PySpice Python code using the prompt template.
     while retry:
         try:
             print("start {} completion".format(args.model))
@@ -1200,7 +1206,9 @@ def work(task, input, output, task_id, it, background, task_type, flog = None,
             elif execution_error == 1:
                 figure_path = "{}/p{}/{}/p{}_{}_{}_figure.png".format(model_dir, task_id, it, task_id, it, code_id)
                 if os.path.exists(figure_path) and client_vlm is not None and code_id < args.num_of_retry - 1:
-                    
+                    # --- LLM Stage 3: Multimodal Waveform Diagnosis ---
+                    # A vision-capable LLM (client_vlm) receives the waveform PNG and
+                    # produces a natural-language diagnosis fed back into the correction loop.
                     prompt_vlm = prompt_vlm_template
                     prompt_vlm = prompt_vlm.replace("[TASK]", task)
                     prompt_vlm = prompt_vlm.replace("[NORMAL_VOUT]", normal_vout)
@@ -1278,6 +1286,9 @@ def work(task, input, output, task_id, it, background, task_type, flog = None,
             break
         messages.append({"role": "user", "content": new_prompt})
 
+        # --- LLM Stage 2: Iterative Error Correction ---
+        # The LLM receives error feedback (execution / simulation / MOSFET-check)
+        # and rewrites the corrected circuit code (up to --num_of_retry rounds).
         retry = True
         while retry:
             try:
@@ -1361,6 +1372,9 @@ def get_retrieval(task, task_id):
         ]
     if "gpt" in args.model and args.retrieval:
         try:
+            # --- LLM Stage 5: Subcircuit Retrieval ---
+            # The LLM selects the most relevant pre-built subcircuit IDs from the
+            # library for the given task (retrieval-augmented generation).
             completion = client.chat.completions.create(
                 model=args.model,
                 messages=messages,

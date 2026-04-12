@@ -37,6 +37,24 @@ This work is an extension of [AnalogCoder](https://arxiv.org/abs/2405.14918) (AA
 - [ ] Update the BO optimization.
 - [ ] Update all ablation study prompts.
 
+# 🤖 LLM Integration Stages
+
+AnalogCoder-Pro integrates large language models (LLMs) at **five key stages** of the analog design pipeline, implemented in `run.py`:
+
+| Stage | Function | LLM Role | Prompt Template |
+|-------|----------|----------|-----------------|
+| **1. Circuit Code Generation** | `work()` – initial call | Translates natural-language circuit specifications into executable PySpice Python code | `prompt_template.md` (basic) / `prompt_template_complex.md` (complex) |
+| **2. Iterative Error Correction** | `work()` – retry loop | Receives execution / simulation / MOSFET-check error messages and rewrites corrected code (up to `--num_of_retry` rounds) | `execution_error.md`, `simulation_error.md` |
+| **3. Multimodal Waveform Diagnosis** | `work()` – VLM branch | A vision-capable LLM (`client_vlm`) ingests the waveform PNG and produces a natural-language diagnosis that is fed back into the correction loop | `vlm_debug_prompt.md` |
+| **4. Performance Optimization** | `optimize_code()` | Converts a validated circuit netlist into a parameterized form (with search ranges) suitable for Bayesian Optimization | `optimize_template.md` |
+| **5. Subcircuit Retrieval** | `get_retrieval()` | Given a new circuit task, the LLM selects the most relevant pre-built subcircuit IDs from the library (retrieval-augmented generation) | `retrieval_prompt.md` |
+
+All LLM calls go through the OpenAI-compatible client initialized at startup:
+```python
+client = OpenAI(api_key=args.api_key, base_url=args.base_url)
+```
+The model is selected via `--model` (e.g. `gpt-5-mini`, `deepseek-chat`, `gemini-*`, `claude-*`). Stages 1–2 and 4–5 use the text LLM (`client`); Stage 3 additionally uses a vision LLM (`client_vlm`) with the same endpoint.
+
 # 🧪 Benchmark
 - Task descriptions are in the file `problem_set.tsv`.
 - Sample circuits are in the `sample_design` directory.
